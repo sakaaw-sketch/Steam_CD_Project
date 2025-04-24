@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自定义音乐与CD旋转（GIF 黑屏修复）</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="js/html2canvas.min.js"></script>
+    <script src="js/gif.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #000000;
+            font-family: Arial, sans-serif;
+            position: relative;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        body.dark-mode {
+            background-color: #000000;
+            color: #ffffff;
+        }
+
+        .media-container {
+            position: relative;
+            width: 450px;
+            height: 200px;
+            margin: 0 auto 20px;
+        }
+
+        #audio-ring-canvas {
+            position: absolute;
+            top: 50%;
+            left: 40%;
+            transform: translate(-50%, -50%);
+            width: 400px;
+            height: 400px;
+            z-index: 0;
+        }
+
+        .album-cover {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 200px;
+            height: 200px;
+            background: url('https://via.placeholder.com/200?text=Cover') center/cover;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            z-index: 2;
+            transition: transform 0.5s ease, opacity 0.5s ease;
+            --glow-size: 25px;
+            --glow-opacity: 0;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .album-cover.uploading {
+            opacity: 0;
+            transform: scale(0.8);
+        }
+
+        .album-cover.playing {
+            --glow-opacity: 1;
+        }
+
+        .album-cover.paused {
+            --glow-opacity: 0;
+        }
+
+        .album-cover.glow {
+            box-shadow: 0 0 var(--glow-size) rgba(var(--glow-color), calc(0.9 * var(--glow-opacity))),
+                        0 0 calc(var(--glow-size) / 2) rgba(var(--glow-color), calc(0.7 * var(--glow-opacity)));
+            transition: box-shadow 2s ease-in-out;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.01) translateY(-2px);
+            }
+        }
+
+        .cd-container {
+            position: absolute;
+            top: 0;
+            left: var(--overlap-offset, 100px);
+            width: 200px;
+            height: 200px;
+            z-index: 1;
+        }
+
+        .cd {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: url('https://via.placeholder.com/200?text=CD') center/cover;
+            position: relative;
+            animation: rotate 4s linear infinite;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            transition: animation-play-state 0.5s ease;
+        }
+
+        .cd.paused {
+            animation-play-state: paused;
+            animation: slowStop 0.5s ease-out forwards;
+        }
+
+        @keyframes slowStop {
+            100% {
+                transform: rotate(0deg);
+            }
+        }
+
+        .cd::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 30px;
+            height: 30px;
+            background: radial-gradient(#fff, #ccc);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
+        }
+
+        .cd::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                45deg,
+                var(--shimmer-color, rgba(255, 255, 255, 0.3)) 0%,
+                var(--shimmer-color, rgba(255, 255, 255, 0.1)) 30%,
+                transparent 50%,
+                var(--shimmer-color, rgba(255, 255, 255, 0.1)) 70%,
+                var(--shimmer-color, rgba(255, 255, 255, 0.3)) 100%
+            );
+            animation: shimmer var(--shimmer-speed, 2s) linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes rotate {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes shimmer {
+            0% {
+                transform: translateX(-100%) rotate(45deg);
+            }
+            to {
+                transform: translateX(100%) rotate(45deg);
+            }
+        }
+
+        .cd.paused::after {
+            animation-play-state: paused;
+        }
+
+        .controls {
+            text-align: center;
+            margin: 40px 0;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #6200ea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin: 5px;
+        }
+
+        button:hover {
+            background-color: #3700b3;
+        }
+
+        .sidebar {
+            position: fixed;
+            left: -300px;
+            top: 0;
+            width: 250px;
+            height: 100%;
+            background-color: #fff;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.2);
+            transition: left 0.3s ease, background-color 0.3s ease, color 0.3s ease;
+            z-index: 1000;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-y: auto;
+        }
+
+        .sidebar.dark-mode {
+            background-color: #2a2a2a;
+            color: #ffffff;
+        }
+
+        .sidebar.active {
+            left: 0;
+        }
+
+        .sidebar-toggle {
+            position: fixed;
+            left: 10px;
+            top: 10px;
+            padding: 10px 15px;
+            background-color: #6200ea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 1001;
+        }
+
+        .sidebar-toggle:hover {
+            background-color: #3700b3;
+        }
+
+        input[type="file"], input[type="color"], input[type="range"], input[type="checkbox"] {
+            margin: 10px 0;
+            font-size: 14px;
+        }
+
+        label {
+            font-size: 16px;
+            margin-right: 10px;
+        }
+
+        .upload-section, .visual-controls, .audio-controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        .visual-controls div, .audio-controls div {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            width: 100%;
+        }
+
+        h4 {
+            margin: 15px 0 5px;
+            font-size: 18px;
+            color: #6200ea;
+        }
+
+        .dark-mode h4 {
+            color: #bb86fc;
+        }
+
+        .progress-container, .volume-container {
+            display: none;
+            width: 200px;
+        }
+
+        .progress-container.active, .volume-container.active {
+            display: block;
+        }
+
+        input[type="range"]#progress-bar, input[type="range"]#volume-control, input[type="range"]#overlap-control,
+        input[type="range"]#gif-frames, input[type="range"]#gif-fps, input[type="range"]#glow-range, 
+        input[type="range"]#glow-cycle, input[type="range"]#ring-opacity, input[type="range"]#ring-position {
+            width: 100%;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            width: 200px;
+            font-size: 12px;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #333;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            opacity: 0;
+            transition: opacity 0.3s ease, bottom 0.3s ease;
+            z-index: 1000;
+            font-size: 14px;
+            max-width: 80%;
+            text-align: center;
+        }
+
+        .dark-mode .toast {
+            background-color: #555;
+        }
+
+        .toast.show {
+            opacity: 1;
+            bottom: 30px;
+        }
+
+        .toast.success {
+            background-color: #4caf50;
+        }
+
+        .toast.error {
+            background-color: #f44336;
+        }
+
+        .gif-preview-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+
+        .gif-preview-modal.active {
+            display: flex;
+        }
+
+        .gif-preview-content {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            max-width: 450px;
+            width: 90%;
+            transition: background-color 0.3s ease;
+        }
+
+        .dark-mode .gif-preview-content {
+            background-color: #2a2a2a;
+            color: #ffffff;
+        }
+
+        .gif-preview-content img {
+            max-width: 450px;
+            margin-bottom: 20px;
+        }
+
+        .gif-preview-content button {
+            margin: 0 10px;
+        }
+
+        .gif-progress-bar {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 300px;
+            background-color: #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+            z-index: 1500;
+            display: none;
+            transition: background-color 0.3s ease;
+        }
+
+        .dark-mode .gif-progress-bar {
+            background-color: #444;
+        }
+
+        .gif-progress-bar.active {
+            display: block;
+        }
+
+        .gif-progress-fill {
+            height: 20px;
+            background-color: #6200ea;
+            width: 0%;
+            transition: width 0.1s ease;
+        }
+
+        .gif-progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 14px;
+            z-index: 1501;
+        }
+    </style>
+</head>
+<body>
+    <button class="sidebar-toggle" onclick="toggleSidebar()">显示控件</button>
+
+    <div class="sidebar" id="sidebar">
+        <h3>控制面板</h3>
+        <div class="upload-section">
+            <h4>上传</h4>
+            <label for="music-upload">上传音乐 (MP3/FLAC):</label>
+            <input type="file" id="music-upload" accept="audio/mpeg,audio/flac">
+            <label for="cd-image-upload">上传CD图片:</label>
+            <input type="file" id="cd-image-upload" accept="image/*">
+            <label for="cover-image-upload">上传唱片封面:</label>
+            <input type="file" id="cover-image-upload" accept="image/*">
+        </div>
+        <div class="visual-controls">
+            <h4>视觉调整</h4>
+            <div>
+                <label for="shimmer-color">光泽颜色:</label>
+                <input type="color" id="shimmer-color" value="#ffffff">
+            </div>
+            <div>
+                <label for="shimmer-speed">光泽速度: <span id="speed-value">2.0</span>s</label>
+                <input type="range" id="shimmer-speed" min="0.5" max="5" step="0.1" value="2">
+            </div>
+            <div>
+                <label for="overlap-control">重叠比例: <span id="overlap-value">50</span>%</label>
+                <input type="range" id="overlap-control" min="30" max="70" step="1" value="50">
+            </div>
+            <div>
+                <label for="glow-range">光圈范围: <span id="glow-value">25</span>px</label>
+                <input type="range" id="glow-range" min="10" max="40" step="1" value="25">
+            </div>
+            <div>
+                <label for="glow-cycle">光圈切换周期: <span id="glow-cycle-value">12</span>s</label>
+                <input type="range" id="glow-cycle" min="4" max="16" step="1" value="12">
+            </div>
+            <div>
+                <label for="ring-color">音频圆环颜色:</label>
+                <input type="color" id="ring-color" value="#ffffff">
+            </div>
+            <div>
+                <label for="ring-opacity">音频圆环透明度: <span id="ring-opacity-value">0.8</span></label>
+                <input type="range" id="ring-opacity" min="0.1" max="1.0" step="0.1" value="0.8">
+            </div>
+            <div>
+                <label for="ring-position">圆环位置: <span id="ring-position-value">40</span>%</label>
+                <input type="range" id="ring-position" min="30" max="60" step="1" value="40">
+            </div>
+     <!--       <div>
+                <label for="gif-frames">GIF帧数: <span id="gif-frames-value">240</span></label>
+                <input type="range" id="gif-frames" min="10" max="300" step="1" value="240">
+            </div>
+            <div>
+                <label for="gif-fps">GIF帧率: <span id="gif-fps-value">20</span>fps</label>
+                <input type="range" id="gif-fps" min="1" max="60" step="1" value="20">
+            </div>
+            <button onclick="captureGIF()">Start GIF Capture</button>                   -->
+        </div>
+        <div class="audio-controls">
+            <h4>音频控制</h4>
+            <div>
+                <input type="checkbox" id="enable-volume" checked>
+                <label for="enable-volume">启用音量控制</label>
+            </div>
+            <div class="volume-container active">
+                <label for="volume-control">音量: <span id="volume-value">23</span>%</label>
+                <input type="range" id="volume-control" min="0" max="100" value="23">
+            </div>
+            <div>
+                <input type="checkbox" id="enable-dark-mode">
+                <label for="enable-dark-mode">启用深色模式</label>
+            </div>
+        </div>
+    </div>
+
+    <div class="media-container">
+        <canvas id="audio-ring-canvas" width="400" height="400"></canvas>
+        <div class="album-cover glow" id="album-cover"></div>
+        <div class="cd-container">
+            <div class="cd" id="cd"></div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button onclick="togglePlay()">播放/暂停</button>
+    </div>
+
+    <div class="audio-controls">
+        <div>
+            <input type="checkbox" id="enable-progress" checked>
+            <label for="enable-progress">启用进度条</label>
+        </div>
+        <div class="progress-container active">
+            <input type="range" id="progress-bar" min="0" max="100" value="0">
+            <div class="progress-info">
+                <span id="current-time">0:00</span>
+                <span id="duration">0:00</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="gif-preview-modal" id="gif-preview-modal">
+        <div class="gif-preview-content">
+            <h3>GIF预览</h3>
+            <img id="gif-preview-image" alt="GIF Preview">
+            <div>
+                <button onclick="downloadGIF()">下载</button>
+                <button onclick="closeGIFPreview()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="gif-progress-bar" id="gif-progress-bar">
+        <div class="gif-progress-fill" id="gif-progress-fill"></div>
+        <span class="gif-progress-text" id="gif-progress-text">0%</span>
+    </div>
+
+    <audio id="background-music" loop></audio>
+
+    <script>
+        const audio = document.getElementById('background-music');
+        const cd = document.getElementById('cd');
+        const albumCover = document.getElementById('album-cover');
+        const audioRingCanvas = document.getElementById('audio-ring-canvas');
+        const musicUpload = document.getElementById('music-upload');
+        const cdImageUpload = document.getElementById('cd-image-upload');
+        const coverImageUpload = document.getElementById('cover-image-upload');
+        const shimmerColor = document.getElementById('shimmer-color');
+        const shimmerSpeed = document.getElementById('shimmer-speed');
+        const speedValue = document.getElementById('speed-value');
+        const overlapControl = document.getElementById('overlap-control');
+        const overlapValue = document.getElementById('overlap-value');
+        const glowRange = document.getElementById('glow-range');
+        const glowValue = document.getElementById('glow-value');
+        const glowCycle = document.getElementById('glow-cycle');
+        const glowCycleValue = document.getElementById('glow-cycle-value');
+        const ringColor = document.getElementById('ring-color');
+        const ringOpacity = document.getElementById('ring-opacity');
+        const ringOpacityValue = document.getElementById('ring-opacity-value');
+        const ringPosition = document.getElementById('ring-position');
+        const ringPositionValue = document.getElementById('ring-position-value');
+        const enableVolume = document.getElementById('enable-volume');
+        const volumeControl = document.getElementById('volume-control');
+        const volumeValue = document.getElementById('volume-value');
+        const enableProgress = document.getElementById('enable-progress');
+        const progressBar = document.getElementById('progress-bar');
+        const currentTime = document.getElementById('current-time');
+        const duration = document.getElementById('duration');
+        const enableDarkMode = document.getElementById('enable-dark-mode');
+        const volumeContainer = document.querySelector('.volume-container');
+        const progressContainer = document.querySelector('.progress-container');
+        const sidebar = document.getElementById('sidebar');
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const mediaContainer = document.querySelector('.media-container');
+        const gifFrames = document.getElementById('gif-frames');
+        const gifFramesValue = document.getElementById('gif-frames-value');
+        const gifFps = document.getElementById('gif-fps');
+        const gifFpsValue = document.getElementById('gif-fps-value');
+        const gifPreviewModal = document.getElementById('gif-preview-modal');
+        const gifPreviewImage = document.getElementById('gif-preview-image');
+        const gifProgressBar = document.getElementById('gif-progress-bar');
+        const gifProgressFill = document.getElementById('gif-progress-fill');
+        const gifProgressText = document.getElementById('gif-progress-text');
+
+        let currentGifBlob = null;
+        let colorCycleInterval = null;
+        let coverColors = ['98, 0, 234'];
+        let currentColorIndex = 0;
+        let currentCycleTime = 12000;
+        let audioContext = null;
+        let analyser = null;
+        let source = null;
+        let canvasCtx = audioRingCanvas.getContext('2d', { willReadFrequently: true });
+        let currentFileName = '';
+        let isCustomColor = false;
+        let customColor = '#ffffff';
+        let isCapturing = false;
+
+        // 初始化音量为23%
+        audio.volume = 0.23;
+
+        // 初始化音频可视化
+        function initAudioVisualizer() {
+            if (audioContext) {
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume().then(() => {
+                        console.log("AudioContext resumed");
+                        if (!isCapturing) drawSpectrum();
+                    }).catch(err => {
+                        console.error("Failed to resume AudioContext:", err);
+                        showToast("音频可视化恢复失败", "error");
+                    });
+                }
+                return;
+            }
+
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 512;
+                source = audioContext.createMediaElementSource(audio);
+                source.connect(analyser);
+                analyser.connect(audioContext.destination);
+                console.log("AudioContext initialized");
+                if (!isCapturing) drawSpectrum();
+            } catch (err) {
+                console.error("Failed to initialize AudioContext:", err);
+                showToast("音频可视化初始化失败", "error");
+            }
+        }
+
+        // 绘制圆环动画
+        function drawSpectrum() {
+            if (!analyser || audio.paused) {
+                canvasCtx.clearRect(0, 0, audioRingCanvas.width, audioRingCanvas.height);
+                if (!audio.paused && !isCapturing) {
+                    requestAnimationFrame(drawSpectrum);
+                }
+                return;
+            }
+
+            const output = new Uint8Array(180);
+            analyser.getByteFrequencyData(output);
+            canvasCtx.clearRect(0, 0, audioRingCanvas.width, audioRingCanvas.height);
+
+            const oW = audioRingCanvas.width;
+            const oH = audioRingCanvas.height;
+            const du = 2;
+            const R = 150;
+            const W = 2;
+
+            let color;
+            if (isCustomColor) {
+                color = customColor;
+            } else {
+                color = canvasCtx.createLinearGradient(oW / 2, oH / 2 - 10, oW / 2, oH / 2 - 150);
+                color.addColorStop(0, '#1E90FF');
+                color.addColorStop(0.25, '#FF7F50');
+                color.addColorStop(0.5, '#8A2BE2');
+                color.addColorStop(0.75, '#4169E1');
+                color.addColorStop(1, '#00FFFF');
+            }
+
+            canvasCtx.globalAlpha = parseFloat(ringOpacity.value || 0.8);
+
+            for (let i = 0; i < 360; i++) {
+                const value = output[i % 180] / 10;
+                canvasCtx.beginPath();
+                canvasCtx.lineWidth = W;
+                const Rv1 = R - value;
+                const Rv2 = R + value;
+                canvasCtx.moveTo((Math.sin((i * du) / 180 * Math.PI) * Rv1 + oW / 2), -Math.cos((i * du) / 180 * Math.PI) * Rv1 + oH / 2);
+                canvasCtx.lineTo((Math.sin((i * du) / 180 * Math.PI) * Rv2 + oW / 2), -Math.cos((i * du) / 180 * Math.PI) * Rv2 + oH / 2);
+                canvasCtx.strokeStyle = color;
+                canvasCtx.stroke();
+            }
+
+            console.log("Drawing spectrum, frequency sample:", output[0]);
+            if (!isCapturing) requestAnimationFrame(drawSpectrum);
+        }
+
+        // 显示Toast提示
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 100);
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, 3000);
+        }
+
+        // 格式化时间
+        function formatTime(seconds) {
+            const min = Math.floor(seconds / 60);
+            const sec = Math.floor(seconds % 60);
+            return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+        }
+
+        // 从图片提取多个颜色
+        function extractColorsFromImage(imgElement, callback) {
+            html2canvas(imgElement, { width: 200, height: 200 }).then(canvas => {
+                const ctx = canvas.getContext('2d');
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                const colors = new Set();
+
+                const samplePoints = [
+                    { x: 50, y: 50 },
+                    { x: 150, y: 50 },
+                    { x: 50, y: 150 },
+                    { x: 150, y: 150 },
+                    { x: 100, y: 100 }
+                ];
+
+                for (let point of samplePoints) {
+                    const index = (point.y * canvas.width + point.x) * 4;
+                    const r = imageData[index];
+                    const g = imageData[index + 1];
+                    const b = imageData[index + 2];
+                    const a = imageData[index + 3];
+                    if (a > 0) {
+                        colors.add(`${r}, ${g}, ${b}`);
+                    }
+                }
+
+                const colorArray = Array.from(colors);
+                if (colorArray.length > 0) {
+                    callback(colorArray);
+                } else {
+                    callback(['98, 0, 234']);
+                }
+            }).catch(err => {
+                console.error('提取颜色失败:', err);
+                showToast("封面颜色提取失败，使用默认颜色", "error");
+                callback(['98, 0, 234']);
+            });
+        }
+
+        // 循环切换光圈颜色
+        function cycleCoverColors() {
+            if (coverColors.length === 0) return;
+
+            albumCover.style.setProperty('--glow-opacity', '0');
+            console.log("Fading out color:", coverColors[currentColorIndex]);
+            setTimeout(() => {
+                currentColorIndex = (currentColorIndex + 1) % coverColors.length;
+                albumCover.style.setProperty('--glow-color', coverColors[currentColorIndex]);
+                albumCover.style.setProperty('--glow-opacity', '1');
+                console.log("Fading in color:", coverColors[currentColorIndex]);
+            }, 2000);
+        }
+
+        // 更新颜色循环定时器
+        function updateColorCycle() {
+            if (colorCycleInterval) {
+                clearInterval(colorCycleInterval);
+            }
+            if (!audio.paused) {
+                colorCycleInterval = setInterval(cycleCoverColors, currentCycleTime);
+            }
+        }
+
+        // 切换播放/暂停
+        function togglePlay() {
+            if (audio.src) {
+                if (audio.paused) {
+                    audio.play().then(() => {
+                        cd.classList.remove('paused');
+                        albumCover.classList.add('playing');
+                        albumCover.classList.remove('paused');
+                        albumCover.style.setProperty('--glow-opacity', '1');
+                        colorCycleInterval = setInterval(cycleCoverColors, currentCycleTime);
+                        initAudioVisualizer();
+                        console.log("Playing, glow and ring enabled, cycle time:", currentCycleTime);
+                        showToast('音乐播放中', 'success');
+                    }).catch(err => {
+                        console.error('播放失败:', err);
+                        showToast('播放失败，请重试', 'error');
+                    });
+                } else {
+                    audio.pause();
+                    cd.classList.add('paused');
+                    albumCover.classList.remove('playing');
+                    albumCover.classList.add('paused');
+                    clearInterval(colorCycleInterval);
+                    albumCover.style.setProperty('--glow-opacity', '0');
+                    drawSpectrum();
+                    console.log("Paused, glow disabled");
+                    showToast('音乐已暂停', 'info');
+                }
+            } else {
+                showToast('请先上传音乐文件！', 'error');
+            }
+        }
+
+        // 同步状态
+        audio.onplay = () => {
+            cd.classList.remove('paused');
+            albumCover.classList.add('playing');
+            albumCover.classList.remove('paused');
+            albumCover.style.setProperty('--glow-opacity', '1');
+            colorCycleInterval = setInterval(cycleCoverColors, currentCycleTime);
+            initAudioVisualizer();
+            console.log("Audio playing, glow and ring enabled");
+        };
+        audio.onpause = () => {
+            cd.classList.add('paused');
+            albumCover.classList.remove('playing');
+            albumCover.classList.add('paused');
+            albumCover.style.setProperty('--glow-opacity', '0');
+            clearInterval(colorCycleInterval);
+            drawSpectrum();
+            console.log("Audio paused, glow disabled");
+        };
+
+        // 切换弹窗显隐
+        function toggleSidebar() {
+            sidebar.classList.toggle('active');
+            sidebarToggle.textContent = sidebar.classList.contains('active') ? '隐藏控件' : '显示控件';
+            showToast(`控制面板已${sidebar.classList.contains('active') ? '显示' : '隐藏'}`, 'info');
+        }
+
+        // 处理音乐上传
+        musicUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file && (file.type === 'audio/mpeg' || file.type === 'audio/flac')) {
+                currentFileName = file.name;
+                const url = URL.createObjectURL(file);
+                audio.src = url;
+                if (audioContext && audioContext.state === 'running') {
+                    audioContext.close().then(() => {
+                        audioContext = null;
+                        audio.play().then(() => {
+                            cd.classList.remove('paused');
+                            albumCover.classList.add('playing');
+                            albumCover.classList.remove('paused');
+                            albumCover.style.setProperty('--glow-opacity', '1');
+                            colorCycleInterval = setInterval(cycleCoverColors, currentCycleTime);
+                            initAudioVisualizer();
+                            showToast('音乐加载成功，已开始播放', 'success');
+                        }).catch(err => {
+                            console.error('自动播放失败:', err);
+                            showToast('音乐加载成功，请点击播放按钮开始', 'info');
+                        });
+                    });
+                } else {
+                    audio.play().then(() => {
+                        cd.classList.remove('paused');
+                        albumCover.classList.add('playing');
+                        albumCover.classList.remove('paused');
+                        albumCover.style.setProperty('--glow-opacity', '1');
+                        colorCycleInterval = setInterval(cycleCoverColors, currentCycleTime);
+                        initAudioVisualizer();
+                        showToast('音乐加载成功，已开始播放', 'success');
+                    }).catch(err => {
+                        console.error('自动播放失败:', err);
+                        showToast('音乐加载成功，请点击播放按钮开始', 'info');
+                    });
+                }
+            } else {
+                showToast('请上传MP3或FLAC格式的音乐文件！', 'error');
+            }
+        });
+
+        // 处理CD图片上传
+        cdImageUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const url = URL.createObjectURL(file);
+                cd.style.background = `url(${url}) center/cover`;
+                showToast('CD图片上传成功', 'success');
+            } else {
+                showToast('请上传图片文件！', 'error');
+            }
+        });
+
+        // 处理唱片封面上传
+        coverImageUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const url = URL.createObjectURL(file);
+                albumCover.classList.add('uploading');
+                setTimeout(() => {
+                    albumCover.style.background = `url(${url}) center/cover`;
+                    albumCover.classList.remove('uploading');
+                    extractColorsFromImage(albumCover, (colors) => {
+                        coverColors = colors;
+                        currentColorIndex = 0;
+                        albumCover.style.setProperty('--glow-color', coverColors[currentColorIndex]);
+                        console.log("Extracted colors:", coverColors);
+                    });
+                }, 50);
+                showToast('唱片封面上传成功', 'success');
+            } else {
+                showToast('请上传图片文件！', 'error');
+            }
+        });
+
+        // 处理光泽颜色调整
+        shimmerColor.addEventListener('input', (event) => {
+            const color = event.target.value;
+            const r = parseInt(color.slice(1, 3), 16);
+            const g = parseInt(color.slice(3, 5), 16);
+            const b = parseInt(color.slice(5, 7), 16);
+            cd.style.setProperty('--shimmer-color', `rgba(${r}, ${g}, ${b}, 0.3)`);
+            showToast('光泽颜色已更新', 'success');
+        });
+
+        // 处理光泽速度调整
+        shimmerSpeed.addEventListener('input', (event) => {
+            const speed = event.target.value;
+            cd.style.setProperty('--shimmer-speed', `${speed}s`);
+            speedValue.textContent = speed;
+            showToast(`光泽速度调整为 ${speed}秒`, 'success');
+        });
+
+        // 处理重叠比例调整
+        overlapControl.addEventListener('input', (event) => {
+            const overlap = event.target.value;
+            const offset = (overlap / 100) * 200;
+            cd.parentElement.style.setProperty('--overlap-offset', `${offset}px`);
+            overlapValue.textContent = overlap;
+            showToast(`重叠比例调整为 ${overlap}%`, 'success');
+        });
+
+        // 处理光圈范围调整
+        glowRange.addEventListener('input', (event) => {
+            const size = event.target.value;
+            albumCover.style.setProperty('--glow-size', `${size}px`);
+            glowValue.textContent = size;
+            console.log("Glow range set to:", size);
+            showToast(`光圈范围调整为 ${size}px`, 'success');
+        });
+
+        // 处理光圈切换周期调整
+        glowCycle.addEventListener('input', (event) => {
+            const cycle = parseInt(event.target.value) * 1000;
+            currentCycleTime = cycle;
+            glowCycleValue.textContent = event.target.value;
+            updateColorCycle();
+            console.log("Glow cycle set to:", cycle);
+            showToast(`光圈切换周期调整为 ${event.target.value}秒`, 'success');
+        });
+
+        // 处理音频圆环颜色调整
+        ringColor.addEventListener('input', (event) => {
+            customColor = event.target.value;
+            isCustomColor = true;
+            drawSpectrum();
+            console.log("Ring color set to:", customColor);
+            showToast('音频圆环颜色已更新', 'success');
+        });
+
+        // 处理音频圆环透明度调整
+        ringOpacity.addEventListener('input', (event) => {
+            const opacity = event.target.value;
+            ringOpacityValue.textContent = opacity;
+            drawSpectrum();
+            console.log("Ring opacity set to:", opacity);
+            showToast(`音频圆环透明度调整为 ${opacity}`, 'success');
+        });
+
+        // 处理圆环位置调整
+        ringPosition.addEventListener('input', (event) => {
+            const position = event.target.value;
+            audioRingCanvas.style.left = `${position}%`;
+            ringPositionValue.textContent = position;
+            showToast(`圆环位置调整为 ${position}%`, 'success');
+        });
+
+        // 音量控制
+        volumeControl.addEventListener('input', (event) => {
+            const volume = event.target.value / 100;
+            audio.volume = volume;
+            volumeValue.textContent = event.target.value;
+            showToast(`音量调整为 ${event.target.value}%`, 'success');
+        });
+
+        // 启用/禁用音量控制
+        enableVolume.addEventListener('change', (event) => {
+            volumeContainer.classList.toggle('active', event.target.checked);
+            showToast(`音量控制已${event.target.checked ? '启用' : '禁用'}`, 'info');
+        });
+
+        // 启用/禁用深色模式
+        enableDarkMode.addEventListener('change', (event) => {
+            document.body.classList.toggle('dark-mode', event.target.checked);
+            sidebar.classList.toggle('dark-mode', event.target.checked);
+            gifPreviewModal.querySelector('.gif-preview-content').classList.toggle('dark-mode', event.target.checked);
+            showToast(`深色模式已${event.target.checked ? '启用' : '禁用'}`, 'info');
+        });
+
+        // 进度条更新
+        audio.addEventListener('timeupdate', () => {
+            if (audio.duration) {
+                const progress = (audio.currentTime / audio.duration) * 100;
+                progressBar.value = progress;
+                currentTime.textContent = formatTime(audio.currentTime);
+                duration.textContent = formatTime(audio.duration);
+            }
+        });
+
+        // 拖动进度条
+        progressBar.addEventListener('input', (event) => {
+            if (audio.duration) {
+                const time = (event.target.value / 100) * audio.duration;
+                audio.currentTime = time;
+                showToast(`进度调整至 ${formatTime(time)}`, 'success');
+            }
+        });
+
+        // 加载音乐时更新时长
+        audio.addEventListener('loadedmetadata', () => {
+            duration.textContent = formatTime(audio.duration);
+            progressBar.value = 0;
+            currentTime.textContent = '0:00';
+        });
+
+        // 启用/禁用进度条
+        enableProgress.addEventListener('change', (event) => {
+            progressContainer.classList.toggle('active', event.target.checked);
+            showToast(`进度条已${event.target.checked ? '启用' : '禁用'}`, 'info');
+        });
+
+        // GIF帧数调整
+        gifFrames.addEventListener('input', (event) => {
+            gifFramesValue.textContent = event.target.value;
+        });
+
+        // GIF帧率调整
+        gifFps.addEventListener('input', (event) => {
+            gifFpsValue.textContent = event.target.value;
+        });
+
+        // 检查 canvas 是否为空
+        function isCanvasEmpty(canvas) {
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            for (let i = 0; i < imageData.length; i += 4) {
+                if (imageData[i + 3] !== 0) return false; // 非透明像素
+            }
+            return true;
+        }
+
+        // 捕获GIF并显示预览
+        async function captureGIF() {
+            if (typeof GIF === 'undefined') {
+                showToast('GIF.js 未加载，请检查 js/gif.min.js 是否存在', 'error');
+                console.error("GIF.js not loaded");
+                return;
+            }
+            if (typeof html2canvas === 'undefined') {
+                showToast('html2canvas 未加载，请检查 js/html2canvas.min.js 是否存在', 'error');
+                console.error("html2canvas not loaded");
+                return;
+            }
+
+            const frames = Math.min(parseInt(gifFrames.value), 300);
+            const fps = Math.min(parseInt(gifFps.value), 60);
+            const frameInterval = Math.max(50, 1000 / fps);
+
+            console.log("GIF capture started:", frames, "frames at", fps, "fps, interval:", frameInterval, "ms");
+            showToast(`开始捕获GIF（${frames}帧，${fps}fps）`, 'info');
+            gifProgressBar.classList.add('active');
+            gifProgressFill.style.width = '0%';
+            gifProgressText.textContent = '0%';
+
+            const workerPath = '/js/gif.worker.js';
+            console.log("Worker script path:", workerPath);
+            const gif = new GIF({
+                workers: 6,
+                quality: 10,
+                width: 600,
+                height: 400,
+                repeat: 0,
+                workerScript: workerPath
+            });
+
+            let framesCaptured = 0;
+            isCapturing = true;
+
+            async function captureFrame() {
+                const startTime = performance.now();
+                console.log("Capturing frame:", framesCaptured + 1, "at", startTime);
+
+                // 强制重绘圆环
+                if (!audio.paused) {
+                    drawSpectrum();
+                }
+
+                try {
+                    const canvas = await html2canvas(mediaContainer, {
+                        width: 600,
+                        height: 400,
+                        x: -100,
+                        y: -100,
+                        backgroundColor: '#000000',
+                        scale: 1,
+                        async: true,
+                        onclone: (doc) => {
+                            const clonedCanvas = doc.getElementById('audio-ring-canvas');
+                            if (clonedCanvas && audioRingCanvas) {
+                                const ctx = clonedCanvas.getContext('2d');
+                                ctx.drawImage(audioRingCanvas, 0, 0);
+                            }
+                            const clonedCover = doc.getElementById('album-cover');
+                            if (clonedCover) {
+                                const style = window.getComputedStyle(albumCover);
+                                clonedCover.style.boxShadow = style.boxShadow;
+                                clonedCover.style.setProperty('--glow-opacity', style.getPropertyValue('--glow-opacity'));
+                                clonedCover.style.setProperty('--glow-color', style.getPropertyValue('--glow-color'));
+                            }
+                        }
+                    });
+
+                    // 检查是否为空
+                    if (isCanvasEmpty(canvas)) {
+                        console.warn("Captured canvas is empty for frame:", framesCaptured + 1);
+                        showToast("截图为空，可能无法显示内容", "error");
+                    }
+
+                    gif.addFrame(canvas, { delay: frameInterval });
+                    framesCaptured++;
+
+                    const progress = (framesCaptured / frames) * 100;
+                    gifProgressFill.style.width = `${progress}%`;
+                    gifProgressText.textContent = `${Math.round(progress)}%`;
+                    console.log("Frame captured:", framesCaptured, "/", frames, "took", performance.now() - startTime, "ms");
+
+                    if (framesCaptured < frames) {
+                        setTimeout(() => {
+                            requestAnimationFrame(captureFrame);
+                        }, frameInterval);
+                    } else {
+                        console.log("All frames captured, starting render...");
+                        gif.on('finished', function(blob) {
+                            console.log("GIF rendering finished");
+                            currentGifBlob = blob;
+                            const url = URL.createObjectURL(blob);
+                            gifPreviewImage.src = url;
+                            gifProgressBar.classList.remove('active');
+                            gifPreviewModal.classList.add('active');
+                            isCapturing = false;
+                            if (!audio.paused) drawSpectrum();
+                            showToast('GIF捕获完成，请预览', 'success');
+                        });
+                        gif.on('progress', function(p) {
+                            console.log("GIF rendering progress:", p * 100, "%");
+                        });
+                        gif.render();
+                    }
+                } catch (err) {
+                    console.error("Frame capture failed:", err);
+                    showToast('捕获帧失败，请检查控制台', 'error');
+                    gifProgressBar.classList.remove('active');
+                    isCapturing = false;
+                    if (!audio.paused) drawSpectrum();
+                }
+            }
+
+            captureFrame();
+        }
+
+        // 下载GIF
+        function downloadGIF() {
+            if (currentGifBlob) {
+                const url = URL.createObjectURL(currentGifBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `animation_${gifFrames.value}f_${gifFps.value}fps.gif`;
+                link.click();
+                URL.revokeObjectURL(url);
+                showToast('GIF下载中', 'success');
+                closeGIFPreview();
+            }
+        }
+
+        // 关闭GIF预览
+        function closeGIFPreview() {
+            gifPreviewModal.classList.remove('active');
+            gifPreviewImage.src = '';
+            currentGifBlob = null;
+        }
+    </script>
+</body>
+</html>
